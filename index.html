@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vault - Enterprise Distributed Object Storage & Cluster Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        vault: {
+                            bg: '#090d16',
+                            card: '#111827',
+                            border: '#1f2937',
+                            primary: '#3b82f6',
+                            accent: '#10b981',
+                            warn: '#f59e0b',
+                            danger: '#ef4444',
+                            purple: '#8b5cf6',
+                        }
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'Fira Code', 'Courier New', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #090d16; color: #f3f4f6; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #090d16; }
+        ::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #374151; }
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 1; box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }
+            50% { opacity: 0.6; box-shadow: 0 0 5px rgba(59, 130, 246, 0.2); }
+        }
+        .node-pulse { animation: pulse-glow 3s infinite; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col bg-[#090d16] text-gray-100 selection:bg-blue-600 selection:text-white">
+
+    <header class="border-b border-gray-800 bg-[#0c1220]/90 backdrop-blur sticky top-0 z-50 px-6 py-3 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold text-xl shadow-lg shadow-blue-500/10">
+                <i class="fa-solid fa-vault"></i>
+            </div>
+            <div>
+                <div class="flex items-center space-x-2">
+                    <h1 class="font-bold text-lg tracking-wider text-white">VAULT</h1>
+                    <span class="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded font-mono border border-blue-500/30">v2.4-ENTERPRISE</span>
+                </div>
+                <p class="text-xs text-gray-400 font-mono">Distributed Object Storage & Fault-Tolerant Replica Mesh</p>
+            </div>
+        </div>
+
+        <!-- Cluster Health Quick Summary -->
+        <div class="hidden md:flex items-center space-x-6 bg-[#111827] border border-gray-800 rounded-lg px-4 py-1.5 text-xs font-mono">
+            <div class="flex items-center space-x-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                <span class="text-gray-400">Nodes:</span>
+                <span id="header-node-count" class="text-emerald-400 font-bold">5/5 Active</span>
+            </div>
+            <div class="h-4 w-px bg-gray-800"></div>
+            <div>
+                <span class="text-gray-400">Total Storage:</span>
+                <span id="header-total-storage" class="text-white font-bold">2.4 TB / 10 TB</span>
+            </div>
+            <div class="h-4 w-px bg-gray-800"></div>
+            <div>
+                <span class="text-gray-400">Raft Term:</span>
+                <span id="header-raft-term" class="text-purple-400 font-bold">Term #42</span>
+            </div>
+            <div class="h-4 w-px bg-gray-800"></div>
+            <div>
+                <span class="text-gray-400">Quorum (N,R,W):</span>
+                <span id="header-quorum" class="text-blue-400 font-bold">3, 2, 2</span>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-3">
+            <button onclick="openConfigModal()" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-mono rounded border border-gray-700 transition flex items-center space-x-1.5">
+                <i class="fa-solid fa-sliders"></i>
+                <span>Policies</span>
+            </button>
+            <button onclick="triggerGlobalRepair()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono rounded shadow-lg shadow-emerald-900/20 transition flex items-center space-x-1.5">
+                <i class="fa-solid fa-shield-halved"></i>
+                <span>Anti-Entropy Scrub</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 p-6 max-w-[1700px] w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Left Sidebar: Cluster Topology & Chaos Engineering -->
+        <div class="lg:col-span-4 flex flex-col space-y-6">
+            
+            <!-- Cluster Nodes Status -->
+            <div class="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-xl flex flex-col">
+                <div class="flex items-center justify-between pb-4 border-b border-gray-800">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-server text-blue-400"></i>
+                        <h2 class="font-bold text-sm tracking-wide">STORAGE NODE TOPOLOGY</h2>
+                    </div>
+                    <span id="cluster-status-badge" class="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">HEALTHY MESH</span>
+                </div>
+
+                <div id="nodes-container" class="mt-4 space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                    <!-- Dynamically populated storage nodes -->
+                </div>
+
+                <div class="mt-4 pt-3 border-t border-gray-800 text-xs text-gray-400 flex justify-between items-center font-mono">
+                    <span>Consistent Hashing Ring</span>
+                    <span class="text-blue-400">Virtual Nodes: 128 / phys</span>
+                </div>
+            </div>
+
+            <!-- Chaos Engineering & Failure Injection -->
+            <div class="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-xl flex flex-col">
+                <div class="flex items-center space-x-2 pb-4 border-b border-gray-800">
+                    <i class="fa-solid fa-triangle-exclamation text-amber-500"></i>
+                    <h2 class="font-bold text-sm tracking-wide">CHAOS ENGINEERING & FAULT INJECTION</h2>
+                </div>
+                <p class="text-xs text-gray-400 mt-2">Test Vault's fault tolerance, replica healing, and quorum availability under simulated hardware failures.</p>
+
+                <div class="mt-4 space-y-3">
+                    <div class="grid grid-cols-2 gap-3">
+                        <button onclick="chaosCrashRandomNode()" class="p-2.5 bg-red-950/40 hover:bg-red-900/40 border border-red-800/50 rounded-lg text-xs font-mono text-red-300 transition flex items-center justify-center space-x-2">
+                            <i class="fa-solid fa-power-off"></i>
+                            <span>Crash Node</span>
+                        </button>
+                        <button onclick="chaosPartitionCluster()" class="p-2.5 bg-amber-950/40 hover:bg-amber-900/40 border border-amber-800/50 rounded-lg text-xs font-mono text-amber-300 transition flex items-center justify-center space-x-2">
+                            <i class="fa-solid fa-network-wired"></i>
+                            <span>Network Split</span>
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <button onclick="chaosCorruptData()" class="p-2.5 bg-purple-950/40 hover:bg-purple-900/40 border border-purple-800/50 rounded-lg text-xs font-mono text-purple-300 transition flex items-center justify-center space-x-2">
+                            <i class="fa-solid fa-biohazard"></i>
+                            <span>Corrupt Bitrot</span>
+                        </button>
+                        <button onclick="resetChaosState()" class="p-2.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-xs font-mono text-gray-300 transition flex items-center justify-center space-x-2">
+                            <i class="fa-solid fa-rotate-right"></i>
+                            <span>Heal All</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mt-4 bg-[#090d16] p-3 rounded-lg border border-gray-800 font-mono text-[11px] text-gray-400">
+                    <div class="text-gray-500 uppercase tracking-widest text-[9px] mb-1 font-bold">Active Chaos State</div>
+                    <div id="chaos-status-text" class="text-emerald-400">No active faults. All replicas synchronized.</div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right Content Area: Object Storage Explorer, Raft Logs & Anti-Entropy -->
+        <div class="lg:col-span-8 flex flex-col space-y-6">
+
+            <!-- Tabs Navigation -->
+            <div class="flex border-b border-gray-800 space-x-6 text-sm font-medium">
+                <button onclick="switchTab('objects')" id="tab-btn-objects" class="pb-3 border-b-2 border-blue-500 text-blue-400 flex items-center space-x-2 transition">
+                    <i class="fa-solid fa-box-archive"></i>
+                    <span>Object Storage Explorer</span>
+                </button>
+                <button onclick="switchTab('raft')" id="tab-btn-raft" class="pb-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center space-x-2 transition">
+                    <i class="fa-solid fa-cubes"></i>
+                    <span>Consensus & Raft Metadata</span>
+                </button>
+                <button onclick="switchTab('repair')" id="tab-btn-repair" class="pb-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center space-x-2 transition">
+                    <i class="fa-solid fa-tree"></i>
+                    <span>Anti-Entropy Merkle Trees</span>
+                </button>
+            </div>
+
+            <!-- Tab 1: Object Storage Explorer -->
+            <div id="tab-content-objects" class="space-y-6">
+                <!-- Upload & Quick Actions Card -->
+                <div class="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-xl">
+                    <h2 class="font-bold text-sm tracking-wide mb-3 flex items-center space-x-2">
+                        <i class="fa-solid fa-cloud-arrow-up text-blue-400"></i>
+                        <span>STORE & REPLICATE OBJECT</span>
+                    </h2>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="md:col-span-2 space-y-3">
+                            <div>
+                                <label class="block text-xs font-mono text-gray-400 mb-1">Object Key / Path</label>
+                                <input type="text" id="obj-key-input" value="analytics/dataset_2026_q2.parquet" class="w-full bg-[#090d16] border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-blue-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-mono text-gray-400 mb-1">Payload Content / Data Stream</label>
+                                <textarea id="obj-data-input" rows="2" class="w-full bg-[#090d16] border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-blue-500">vault://block/payload/streaming-buffer-chunk-8192-bytes</textarea>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col justify-between space-y-3">
+                            <div class="bg-[#090d16] p-3 rounded-lg border border-gray-800 text-xs font-mono space-y-1">
+                                <div class="text-gray-400 text-[10px]">CHUNKING & HASHING</div>
+                                <div class="text-gray-200">Block Size: <span class="text-blue-400">4 MB</span></div>
+                                <div class="text-gray-200">Checksum: <span class="text-emerald-400">SHA-256</span></div>
+                            </div>
+                            <button onclick="handleStoreObject()" class="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-mono text-xs font-bold rounded-lg shadow-lg shadow-blue-900/30 transition flex items-center justify-center space-x-2">
+                                <i class="fa-solid fa-upload"></i>
+                               <span>Write & Replicate Object</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stored Objects Table -->
+                <div class="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-xl">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center space-x-2">
+                            <i class="fa-solid fa-database text-emerald-400"></i>
+                            <h2 class="font-bold text-sm tracking-wide">STORED OBJECT CATALOGUE</h2>
+                        </div>
+                        <span id="object-count-badge" class="text-xs font-mono text-gray-400">3 objects indexed</span>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs font-mono">
+                            <thead class="bg-[#0c1220] text-gray-400 border-b border-gray-800">
+                                <tr>
+                                    <th class="p-3">Object Key</th>
+                                    <th class="p-3">Size & Chunks</th>
+                                    <th class="p-3">SHA-256 Checksum</th>
+                                    <th class="p-3">Replication Status</th>
+                                    <th class="p-3 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="objects-table-body" class="divide-y divide-gray-800/60">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 2: Consensus & Raft Metadata Logs -->
+            <div id="tab-content-raft" class="hidden space-y-6">
+                <div class="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-xl">
+                    <div class="flex items-center justify-between pb-4 border-b border-gray-800">
+                        <div class="flex items-center space-x-2">
+                            <i class="fa-solid fa-cubes text-purple-400"></i>
+                            <h2 class="font-bold text-sm tracking-wide">RAFT CONSENSUS LEADER & LOG REPLICATION</h2>
+                        </div>
+                        <div class="flex items-center space-x-3 text-xs font-mono">
+                            <span class="text-gray-400">Leader: <span id="raft-leader-badge" class="text-purple-400 font-bold">Node-1 (Leader)</span></span>
+                            <button onclick="triggerRaftElection()" class="px-2.5 py-1 bg-purple-950/60 hover:bg-purple-900/60 border border-purple-700/50 rounded text-purple-300">Force Election</button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                        <div class="bg-[#090d16] p-4 rounded-xl border border-gray-800">
+                            <div class="text-gray-400 text-xs font-mono">COMMIT INDEX</div>
+                            <div id="raft-commit-index" class="text-2xl font-bold font-mono text-white mt-1">#1,429</div>
+                            <div class="text-[11px] text-emerald-400 mt-1"><i class="fa-solid fa-check"></i> 100% quorum match</div>
+                        </div>
+                        <div class="bg-[#090d16] p-4 rounded-xl border border-gray-800">
+                            <div class="text-gray-400 text-xs font-mono">ELECTION TIMEOUT</div>
+                            <div class="text-2xl font-bold font-mono text-amber-400 mt-1">150 - 300ms</div>
+                            <div class="text-[11px] text-gray-500 mt-1">Randomized heartbeat timer</div>
+                        </div>
+                        <div class="bg-[#090d16] p-4 rounded-xl border border-gray-800">
+                            <div class="text-gray-400 text-xs font-mono">METADATA PARTITIONS</div>
+                            <div class="text-2xl font-bold font-mono text-blue-400 mt-1">64 Shards</div>
+                            <div class="text-[11px] text-blue-400 mt-1">Distributed multi-Raft groups</div>
+                        </div>
+                    </div>
+
+                    <div class="mt-5">
+                        <div class="text-xs font-mono text-gray-400 mb-2">LIVE RAFT LOG STREAM</div>
+                        <div id="raft-logs-container" class="bg-[#06090f] border border-gray-800 rounded-lg p-4 font-mono text-xs h-64 overflow-y-auto space-y-2">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 3: Anti-Entropy Merkle Trees & Auto-Repair -->
+            <div id="tab-content-repair" class="hidden space-y-6">
+                <div class="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-xl">
+                    <div class="flex items-center justify-between pb-4 border-b border-gray-800">
+                        <div class="flex items-center space-x-2">
+                            <i class="fa-solid fa-tree text-emerald-400"></i>
+                            <h2 class="font-bold text-sm tracking-wide">MERKLE TREE ANTI-ENTROPY REPLICA SYNC</h2>
+                        </div>
+                        <button onclick="runMerkleDiff()" class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs rounded shadow transition">
+                            Run Merkle Tree Diff
+                        </button>
+                    </div>
+
+                    <p class="text-xs text-gray-400 mt-3">
+                        Background anti-entropy daemon constructs hierarchical cryptographic Merkle trees across node replicas. Leaf hashes represent 64KB data block segments. Divergent branches trigger zero-copy stream repairs.
+                    </p>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
+                        <div class="bg-[#090d16] p-4 rounded-xl border border-gray-800">
+                            <div class="flex justify-between items-center mb-3">
+                                <span class="text-xs font-mono text-blue-400 font-bold">Node-1 Primary Merkle Root</span>
+                                <span class="text-[10px] font-mono bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">Synced</span>
+                            </div>
+                            <div id="merkle-tree-1" class="font-mono text-xs space-y-1.5 text-gray-300">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+
+                        <div class="bg-[#090d16] p-4 rounded-xl border border-gray-800">
+                            <div class="flex justify-between items-center mb-3">
+                                <span class="text-xs font-mono text-purple-400 font-bold">Node-2 Replica Merkle Root</span>
+                                <span id="merkle-status-2" class="text-[10px] font-mono bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded">Valid</span>
+                            </div>
+                            <div id="merkle-tree-2" class="font-mono text-xs space-y-1.5 text-gray-300">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-5 bg-[#06090f] border border-gray-800 rounded-lg p-4 font-mono text-xs">
+                        <div class="text-gray-500 text-[10px] uppercase mb-1 font-bold">Anti-Entropy Repair Event Log</div>
+                        <div id="repair-event-log" class="space-y-1.5 text-gray-300 max-h-36 overflow-y-auto">
+                            <div class="text-gray-500">[03:40:15] Background scrubber initialized. All 5 nodes verified against root hashes.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <div id="config-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-[#111827] border border-gray-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5">
+            <div class="flex items-center justify-between pb-3 border-b border-gray-800">
+                <h3 class="font-bold text-sm tracking-wide flex items-center space-x-2">
+                    <i class="fa-solid fa-sliders text-blue-400"></i>
+                    <span>QUORUM & DURABILITY POLICIES</span>
+                </h3>
+                <button onclick="closeConfigModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="space-y-4 text-xs font-mono">
+                <div>
+                    <label class="block text-gray-400 mb-1">Replication Factor (N): <span id="val-n" class="text-blue-400 font-bold">3</span></label>
+                    <input type="range" id="input-n" min="3" max="5" value="3" oninput="updateQuorumLabels()" class="w-full accent-blue-500">
+                    <span class="text-[10px] text-gray-500">Total number of storage nodes holding object replicas.</span>
+                </div>
+
+                <div>
+                    <label class="block text-gray-400 mb-1">Read Quorum (R): <span id="val-r" class="text-emerald-400 font-bold">2</span></label>
+                    <input type="range" id="input-r" min="1" max="3" value="2" oninput="updateQuorumLabels()" class="w-full accent-emerald-500">
+                    <span class="text-[10px] text-gray-500">Number of nodes that must respond during read path.</span>
+                </div>
+
+                <div>
+                    <label class="block text-gray-400 mb-1">Write Quorum (W): <span id="val-w" class="text-purple-400 font-bold">2</span></label>
+                    <input type="range" id="input-w" min="1" max="3" value="2" oninput="updateQuorumLabels()" class="w-full accent-purple-500">
+                    <span class="text-[10px] text-gray-500">Number of replicas that must acknowledge write before success.</span>
+                </div>
+
+                <div class="bg-[#090d16] p-3 rounded-lg border border-gray-800 text-[11px] text-gray-300">
+                    <div id="quorum-consistency-check" class="text-emerald-400 font-bold mb-1"><i class="fa-solid fa-check-circle"></i> Strict Consistency Enforced (W + R > N)</div>
+                    <p class="text-gray-400">Ensures no stale reads. Read quorum overlaps with write quorum.</p>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-3 pt-3 border-t border-gray-800">
+                <button onclick="closeConfigModal()" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-xs font-mono">Cancel</button>
+                <button onclick="saveQuorumPolicies()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-mono font-bold shadow">Save Policies</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="alert-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-[#111827] border border-gray-800 rounded-xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+            <div id="alert-icon" class="w-10 h-10 rounded-full bg-blue-600/20 text-blue-400 flex items-center justify-center text-lg mx-auto">
+                <i class="fa-solid fa-circle-info"></i>
+            </div>
+            <div class="text-center">
+                <h4 id="alert-title" class="font-bold text-sm text-white">Vault Notice</h4>
+                <p id="alert-message" class="text-xs text-gray-400 mt-1">Operation completed successfully.</p>
+            </div>
+            <button onclick="closeAlertModal()" class="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-mono font-bold rounded-lg transition">Acknowledge</button>
+        </div>
+    </div>
+
+    <script>
+        // System State
+        let clusterNodes = [
+            { id: 1, name: "vault-node-01", ip: "10.240.0.11", status: "online", diskUsed: 520, diskTotal: 2000, role: "Leader", checksumDrift: false },
+            { id: 2, name: "vault-node-02", ip: "10.240.0.12", status: "online", diskUsed: 490, diskTotal: 2000, role: "Follower", checksumDrift: false },
+            { id: 3, name: "vault-node-03", ip: "10.240.0.13", status: "online", diskUsed: 510, diskTotal: 2000, role: "Follower", checksumDrift: false },
+            { id: 4, name: "vault-node-04", ip: "10.240.0.14", status: "online", diskUsed: 460, diskTotal: 2000, role: "Follower", checksumDrift: false },
+            { id: 5, name: "vault-node-05", ip: "10.240.0.15", status: "online", diskUsed: 420, diskTotal: 2000, role: "Follower", checksumDrift: false }
+        ];
+
+        let storedObjects = [
+            { key: "users/avatars/profile_991.png", size: "2.4 MB", chunks: 1, checksum: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", replicas: [1, 2, 3], status: "Synced" },
+            { key: "logs/system/access_2026_06.log", size: "18.6 MB", chunks: 5, checksum: "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4", replicas: [2, 3, 4], status: "Synced" },
+            { key: "analytics/dataset_2026_q2.parquet", size: "124.0 MB", chunks: 31, checksum: "5fcbc200543eef6f363c46a6f691b0f5509930fbf02a4b95f2d6e3557e0b57e7", replicas: [1, 3, 5], status: "Synced" }
+        ];
+
+        let raftLogs = [
+            { term: 42, index: 1429, cmd: "SET metadata_key/0x8892 -> node_replica_map[1,2,3]", status: "Committed" },
+            { term: 42, index: 1428, cmd: "APPEND chunk_hash_e3b0c4 -> node_01", status: "Committed" },
+            { term: 42, index: 1427, cmd: "HEARTBEAT_PULSE Leader: vault-node-01", status: "Committed" },
+            { term: 41, index: 1426, cmd: "TERM_ELECTION Leader selected: vault-node-01", status: "Committed" }
+        ];
+
+        let quorumConfig = { n: 3, r: 2, w: 2 };
+        let activeChaos = null;
+
+        // On Load Initialization
+        window.onload = function() {
+            renderNodes();
+            renderObjects();
+            renderRaftLogs();
+            renderMerkleTrees();
+            updateHeaderMetrics();
+        };
+
+        // Render Storage Nodes
+        function renderNodes() {
+            const container = document.getElementById('nodes-container');
+            container.innerHTML = '';
+
+            clusterNodes.forEach(node => {
+                const percent = Math.round((node.diskUsed / node.diskTotal) * 100);
+                let statusColor = node.status === 'online' ? 'bg-emerald-500' : 'bg-red-500';
+                let statusText = node.status === 'online' ? 'ONLINE' : 'CRASHED / OFFLINE';
+                if (node.status === 'partitioned') {
+                    statusColor = 'bg-amber-500 animate-pulse';
+                    statusText = 'PARTITIONED';
+                }
+
+                container.innerHTML += `
+                    <div class="bg-[#090d16] border border-gray-800/80 rounded-lg p-3.5 flex flex-col space-y-2.5 font-mono transition hover:border-gray-700">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <span class="w-2.5 h-2.5 rounded-full ${statusColor}"></span>
+                                <span class="font-bold text-white text-xs">${node.name}</span>
+                                <span class="text-[10px] bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">${node.ip}</span>
+                            </div>
+                            <span class="text-[10px] px-2 py-0.5 rounded ${node.role === 'Leader' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-gray-800 text-gray-400'}">${node.role}</span>
+                        </div>
+                        
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[11px] text-gray-400">
+                                <span>Disk Utilization (${percent}%)</span>
+                                <span>${node.diskUsed} GB / ${node.diskTotal} GB</span>
+                            </div>
+                            <div class="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
+                                <div class="bg-blue-500 h-full rounded-full" style="width: ${percent}%"></div>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between pt-1 text-[10px] text-gray-500">
+                            <span>Status: <span class="${node.status === 'online' ? 'text-emerald-400' : 'text-red-400'}">${statusText}</span></span>
+                            <span>Bitrot: <span class="${node.checksumDrift ? 'text-amber-400 animate-pulse font-bold' : 'text-emerald-400'}">${node.checksumDrift ? 'DRIFT DETECTED' : 'SECURE'}</span></span>
+                        </div>
+                    </div>
+                `;
+            });
+
+            // Update header node count
+            const activeCount = clusterNodes.filter(n => n.status === 'online').length;
+            document.getElementById('header-node-count').innerText = `${activeCount}/${clusterNodes.length} Active`;
+        }
+
+        // Render Stored Objects
+        function renderObjects() {
+            const tbody = document.getElementById('objects-table-body');
+            tbody.innerHTML = '';
+
+            storedObjects.forEach((obj, idx) => {
+                let statusBadge = obj.status === 'Synced' 
+                    ? '<span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Synced</span>'
+                    : '<span class="px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">Repairing</span>';
+
+                tbody.innerHTML += `
+                    <tr class="hover:bg-[#0c1220] transition">
+                        <td class="p-3 font-medium text-white">${obj.key}</td>
+                        <td class="p-3 text-gray-300">${obj.size} <span class="text-gray-500 text-[10px]">(${obj.chunks} chunks)</span></td>
+                        <td class="p-3 text-gray-400 font-mono text-[11px]">${obj.checksum.substring(0, 16)}...</td>
+                        <td class="p-3">${statusBadge} <span class="text-[10px] text-gray-500 ml-1">Nodes [${obj.replicas.join(',')}]</span></td>
+                        <td class="p-3 text-right space-x-2">
+                            <button onclick="verifyObjectChecksum(${idx})" class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 bg-blue-950/40 rounded border border-blue-800/40" title="Verify SHA-256 Checksum">Verify</button>
+                            <button onclick="downloadObject('${obj.key}')" class="text-gray-400 hover:text-gray-200 text-xs px-2 py-1 bg-gray-800 rounded border border-gray-700"><i class="fa-solid fa-download"></i></button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            document.getElementById('object-count-badge').innerText = `${storedObjects.length} objects indexed`;
+        }
+
+        // Render Raft Metadata Logs
+        function renderRaftLogs() {
+            const container = document.getElementById('raft-logs-container');
+            container.innerHTML = '';
+
+            raftLogs.forEach(log => {
+                container.innerHTML += `
+                    <div class="flex items-center justify-between border-b border-gray-800/60 pb-1.5">
+                        <div class="flex items-center space-x-2">
+                            <span class="text-purple-400 font-bold">[Term ${log.term}]</span>
+                            <span class="text-gray-500">#${log.index}</span>
+                            <span class="text-gray-300">${log.cmd}</span>
+                        </div>
+                        <span class="text-[10px] text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/30">${log.status}</span>
+                    </div>
+                `;
+            });
+        }
+
+        // Render Merkle Trees
+        function renderMerkleTrees() {
+            const tree1 = document.getElementById('merkle-tree-1');
+            const tree2 = document.getElementById('merkle-tree-2');
+
+            const tree1Html = `
+                <div class="text-emerald-400 font-bold">Root: 0x9f8a3c...e12b</div>
+                <div class="pl-3 border-l border-gray-800 space-y-1">
+                    <div>├── L1-A: 0x4d12...88a1</div>
+                    <div class="pl-3 border-l border-gray-800 text-gray-500 text-[11px]">
+                        <div>├── Chunk 0: e3b0c442...</div>
+                        <div>└── Chunk 1: 8f434346...</div>
+                    </div>
+                    <div>└── L1-B: 0x3e19...c0f4</div>
+                    <div class="pl-3 border-l border-gray-800 text-gray-500 text-[11px]">
+                        <div>└── Chunk 2: 5fcbc200...</div>
+                    </div>
+                </div>
+            `;
+
+            let tree2Html = tree1Html;
+            let status2 = '<span class="text-[10px] font-mono bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded">Valid</span>';
+
+            if (activeChaos === 'bitrot') {
+                tree2Html = `
+                    <div class="text-amber-400 font-bold">Root: 0x77ba11...f00d (MISMATCH)</div>
+                    <div class="pl-3 border-l border-gray-800 space-y-1">
+                        <div>├── L1-A: 0x4d12...88a1</div>
+                        <div class="pl-3 border-l border-gray-800 text-gray-500 text-[11px]">
+                            <div>├── Chunk 0: e3b0c442...</div>
+                            <div>└── Chunk 1: 8f434346...</div>
+                        </div>
+                        <div class="text-amber-400 font-bold">└── L1-B: 0x9900...CORRUPT</div>
+                        <div class="pl-3 border-l border-gray-800 text-amber-300 text-[11px]">
+                            <div>└── Chunk 2: 00000000... (BITROT)</div>
+                        </div>
+                    </div>
+                `;
+                status2 = '<span class="text-[10px] font-mono bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded animate-pulse">DRIFT DETECTED</span>';
+            }
+
+            tree1.innerHTML = tree1Html;
+            tree2.innerHTML = tree2Html;
+            document.getElementById('merkle-status-2').innerHTML = status2;
+        }
+
+        // Helper Tab Switching
+        function switchTab(tab) {
+            ['objects', 'raft', 'repair'].forEach(t => {
+                document.getElementById(`tab-content-${t}`).classList.add('hidden');
+                const btn = document.getElementById(`tab-btn-${t}`);
+                btn.classList.remove('border-blue-500', 'text-blue-400');
+                btn.classList.add('border-transparent', 'text-gray-400');
+            });
+
+            document.getElementById(`tab-content-${tab}`).classList.remove('hidden');
+            const activeBtn = document.getElementById(`tab-btn-${tab}`);
+            activeBtn.classList.remove('border-transparent', 'text-gray-400');
+            activeBtn.classList.add('border-blue-500', 'text-blue-400');
+        }
+
+        // UI Header Updates
+        function updateHeaderMetrics() {
+            document.getElementById('header-quorum').innerText = `${quorumConfig.n}, ${quorumConfig.r}, ${quorumConfig.w}`;
+        }
+
+        // Object Store Action
+        function handleStoreObject() {
+            const keyInput = document.getElementById('obj-key-input').value.trim();
+            const dataInput = document.getElementById('obj-data-input').value.trim();
+
+            if (!keyInput) {
+                showAlert("Validation Error", "Please provide a valid object key path.");
+                return;
+            }
+
+            // Check write quorum online nodes
+            const activeNodes = clusterNodes.filter(n => n.status === 'online').length;
+            if (activeNodes < quorumConfig.w) {
+                showAlert("Quorum Failure", `Write quorum not satisfied! Required: ${quorumConfig.w}, Active: ${activeNodes}. Write rejected to prevent inconsistency.`);
+                return;
+            }
+
+            // Simple deterministic hashing mock
+            const pseudoHash = Array.from(keyInput + dataInput)
+                .reduce((hash, char) => (hash << 5) - hash + char.charCodeAt(0), 0)
+                .toString(16) + "e3b0c44298fc1c149afbf4c8996fb92427";
+
+            // Select node replicas
+            const replicas = [1, 2, 3].slice(0, quorumConfig.n);
+
+            storedObjects.unshift({
+                key: keyInput,
+                size: `${(dataInput.length * 0.12).toFixed(1)} MB`,
+                chunks: Math.ceil(dataInput.length / 20) || 1,
+                checksum: pseudoHash,
+                replicas: replicas,
+                status: "Synced"
+            });
+
+            // Append Raft Log Entry
+            raftLogs.unshift({
+                term: 42,
+                index: raftLogs[0].index + 1,
+                cmd: `PUT key=${keyInput} hash=${pseudoHash.substring(0, 8)}`,
+                status: "Committed"
+            });
+
+            document.getElementById('raft-commit-index').innerText = `#${raftLogs[0].index}`;
+
+            renderObjects();
+            renderRaftLogs();
+            showAlert("Object Replicated", `Object successfully chunked, hashed, and replicated across ${replicas.length} target nodes.`);
+        }
+
+        // Verify Checksum
+        function verifyObjectChecksum(index) {
+            const obj = storedObjects[index];
+            if (activeChaos === 'bitrot' && obj.replicas.includes(2)) {
+                showAlert("Bitrot Mismatch Detected", `SHA-256 Checksum verification failed on Node-02 for object '${obj.key}'. Bitrot detected! Auto-repair recommended.`);
+            } else {
+                showAlert("Integrity Verified", `SHA-256 Checksum ${obj.checksum.substring(0, 24)}... verified across all target replicas.`);
+            }
+        }
+
+        function downloadObject(key) {
+            showAlert("Object Download Streamed", `Data payload for '${key}' streamed from primary replica quorum.`);
+        }
+
+        // Raft Election Trigger
+        function triggerRaftElection() {
+            const activeNodes = clusterNodes.filter(n => n.status === 'online');
+            if (activeNodes.length === 0) {
+                showAlert("Election Failed", "No active nodes available to elect a new leader.");
+                return;
+            }
+
+            // Reset current roles
+            clusterNodes.forEach(n => n.role = 'Follower');
+            // Select new leader from active nodes
+            const newLeader = activeNodes[Math.floor(Math.random() * activeNodes.length)];
+            newLeader.role = 'Leader';
+
+            raftLogs.unshift({
+                term: 43,
+                index: raftLogs[0].index + 1,
+                cmd: `ELECTION_WON Candidate ${newLeader.name} term #43`,
+                status: "Committed"
+            });
+
+            document.getElementById('header-raft-term').innerText = "Term #43";
+            document.getElementById('raft-leader-badge').innerText = `${newLeader.name} (Leader)`;
+
+            renderNodes();
+            renderRaftLogs();
+            showAlert("Raft Re-election Complete", `${newLeader.name} elected as new Raft Leader for Term #43.`);
+        }
+
+        // Chaos Engineering Actions
+        function chaosCrashRandomNode() {
+            const onlineNodes = clusterNodes.filter(n => n.status === 'online');
+            if (onlineNodes.length === 0) return;
+
+            const targetNode = onlineNodes[Math.floor(Math.random() * onlineNodes.length)];
+            targetNode.status = 'offline';
+
+            if (targetNode.role === 'Leader') {
+                targetNode.role = 'Follower';
+                triggerRaftElection();
+            }
+
+            activeChaos = 'crash';
+            document.getElementById('chaos-status-text').className = 'text-red-400 font-bold';
+            document.getElementById('chaos-status-text').innerText = `CRASH INJECTED: Node ${targetNode.name} taken offline.`;
+
+            document.getElementById('cluster-status-badge').innerText = "DEGRADED MESH";
+            document.getElementById('cluster-status-badge').className = "px-2 py-0.5 rounded text-[10px] font-mono bg-amber-500/20 text-amber-400 border border-amber-500/30";
+
+            renderNodes();
+        }
+
+        function chaosPartitionCluster() {
+            clusterNodes[3].status = 'partitioned';
+            clusterNodes[4].status = 'partitioned';
+
+            activeChaos = 'partition';
+            document.getElementById('chaos-status-text').className = 'text-amber-400 font-bold';
+            document.getElementById('chaos-status-text').innerText = 'NETWORK PARTITION: Nodes 04 and 05 isolated from Raft core.';
+
+            document.getElementById('cluster-status-badge').innerText = "PARTITIONED";
+            document.getElementById('cluster-status-badge').className = "px-2 py-0.5 rounded text-[10px] font-mono bg-amber-500/20 text-amber-400 border border-amber-500/30";
+
+            renderNodes();
+        }
+
+        function chaosCorruptData() {
+            clusterNodes[1].checksumDrift = true;
+            activeChaos = 'bitrot';
+
+            document.getElementById('chaos-status-text').className = 'text-purple-400 font-bold';
+            document.getElementById('chaos-status-text').innerText = 'BITROT INJECTED: Silent corruption on node-02 block hash.';
+
+            renderNodes();
+            renderMerkleTrees();
+        }
+
+        function resetChaosState() {
+            clusterNodes.forEach(node => {
+                node.status = 'online';
+                node.checksumDrift = false;
+            });
+            clusterNodes[0].role = 'Leader';
+
+            activeChaos = null;
+            document.getElementById('chaos-status-text').className = 'text-emerald-400';
+            document.getElementById('chaos-status-text').innerText = 'No active faults. All replicas synchronized.';
+
+            document.getElementById('cluster-status-badge').innerText = "HEALTHY MESH";
+            document.getElementById('cluster-status-badge').className = "px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+
+            renderNodes();
+            renderMerkleTrees();
+            showAlert("Cluster Restored", "All node failures healed and Merkle trees resynchronized.");
+        }
+
+        // Anti-Entropy Repair
+        function runMerkleDiff() {
+            if (activeChaos === 'bitrot') {
+                const log = document.getElementById('repair-event-log');
+                log.innerHTML += `<div class="text-amber-400">[${new Date().toLocaleTimeString()}] Merkle tree diff found branch divergence on Node-2. Stream repairing chunk 2...</div>`;
+                
+                setTimeout(() => {
+                    log.innerHTML += `<div class="text-emerald-400">[${new Date().toLocaleTimeString()}] Auto-repair succeeded. Streamed zero-copy chunk replacement from Node-1.</div>`;
+                    clusterNodes[1].checksumDrift = false;
+                    activeChaos = null;
+                    renderNodes();
+                    renderMerkleTrees();
+                }, 1500);
+            } else {
+                showAlert("Merkle Diff Clean", "All replica roots match perfectly. Zero entropy drift across storage nodes.");
+            }
+        }
+
+        function triggerGlobalRepair() {
+            runMerkleDiff();
+            if (activeChaos !== 'bitrot') {
+                showAlert("Anti-Entropy Scrub", "Scrubber run completed. All object blocks match target SHA-256 hashes.");
+            }
+        }
+
+        // Configuration Modal Logic
+        function openConfigModal() {
+            document.getElementById('config-modal').classList.remove('hidden');
+        }
+
+        function closeConfigModal() {
+            document.getElementById('config-modal').classList.add('hidden');
+        }
+
+        function updateQuorumLabels() {
+            const n = parseInt(document.getElementById('input-n').value);
+            const r = parseInt(document.getElementById('input-r').value);
+            const w = parseInt(document.getElementById('input-w').value);
+
+            document.getElementById('val-n').innerText = n;
+            document.getElementById('val-r').innerText = r;
+            document.getElementById('val-w').innerText = w;
+
+            const check = document.getElementById('quorum-consistency-check');
+            if (w + r > n) {
+                check.className = "text-emerald-400 font-bold mb-1";
+                check.innerHTML = '<i class="fa-solid fa-check-circle"></i> Strict Consistency Enforced (W + R > N)';
+            } else {
+                check.className = "text-amber-400 font-bold mb-1";
+                check.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Eventual Consistency Only (W + R <= N)';
+            }
+        }
+
+        function saveQuorumPolicies() {
+            quorumConfig.n = parseInt(document.getElementById('input-n').value);
+            quorumConfig.r = parseInt(document.getElementById('input-r').value);
+            quorumConfig.w = parseInt(document.getElementById('input-w').value);
+
+            updateHeaderMetrics();
+            closeConfigModal();
+            showAlert("Policies Updated", `Quorum updated to N=${quorumConfig.n}, R=${quorumConfig.r}, W=${quorumConfig.w}`);
+        }
+
+        // Alert Modal Helper
+        function showAlert(title, message) {
+            document.getElementById('alert-title').innerText = title;
+            document.getElementById('alert-message').innerText = message;
+            document.getElementById('alert-modal').classList.remove('hidden');
+        }
+
+        function closeAlertModal() {
+            document.getElementById('alert-modal').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
